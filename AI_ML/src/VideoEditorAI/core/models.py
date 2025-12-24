@@ -6,6 +6,7 @@ class SegmentType(str, Enum):
     CUT = "cut"
     HIGHLIGHT = "highlight"
     KEEP = "keep"
+    TRANSITION = "transition"
 
 @dataclass
 class VideoSegment:

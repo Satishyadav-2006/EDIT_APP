@@ -38,7 +38,8 @@ class VideoAnalysisPipeline:
         if not os.path.exists(video_path):
             raise FileNotFoundError(f"Video file not found: {video_path}")
 
-        print(f"INFO:ai.analyzer:Starting analysis for: {video_path}")
+        print(f"[DEBUG] VideoAnalysisPipeline received path: {video_path}")
+        print(f"[DEBUG] File size: {os.path.getsize(video_path)} bytes")
         
         # 0. Get Video Info (Duration)
         duration = self._get_video_duration(video_path)
@@ -50,8 +51,8 @@ class VideoAnalysisPipeline:
         
         print(f"INFO:ai.audio_analysis:Loading audio file: {audio_path}")
         silence_intervals = self.audio_processor.detect_silence(audio_path)
-        energy_peaks = self.audio_processor.get_high_energy_segments(audio_path)
-        print(f"INFO:ai.audio_analysis:Found {len(silence_intervals)} silence segments.")
+        energy_peaks = self.audio_processor.get_high_energy_segments(audio_path, top_n=5)
+        print(f"INFO:ai.audio_analysis:Found {len(silence_intervals)} silence segments and {len(energy_peaks)} energy peaks.")
 
         # 2. Transcription
         print(f"INFO:ai.speech_to_text:Loading Whisper model '{settings.WHISPER_MODEL_SIZE}'...")
@@ -66,7 +67,7 @@ class VideoAnalysisPipeline:
         print(f"INFO:ai.nlp_analysis:Detected {len(redundancies)} redundancy pairs.")
 
         # 4. Decision Engine
-        print("INFO:ai.analyzer:Running Decision Engine...")
+        print(f"[DEBUG] Decisions inputs: Silences={len(silence_intervals)}, Segments={len(video_segments)}, Redundancies={len(redundancies)}, Peaks={len(energy_peaks)}")
         suggestions = self.decision_engine.generate_suggestions(
             silence_intervals, 
             video_segments, 

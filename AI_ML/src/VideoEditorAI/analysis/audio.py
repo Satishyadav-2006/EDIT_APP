@@ -44,7 +44,7 @@ class AudioProcessor:
         Detects silent segments in the audio file.
         Returns a list of (start_time, end_time) tuples.
         """
-        print("Loading audio for silence detection...")
+        print(f"[DEBUG] Loading audio for silence detection from: {audio_path}")
         y, sr = librosa.load(audio_path, sr=self.sample_rate)
         
         # Compute RMS energy
@@ -106,21 +106,29 @@ class AudioProcessor:
         rms_cp = rms.copy()
         duration = librosa.get_duration(y=y, sr=sr)
         
+        # hop_length is 512 by default in librosa.feature.rms
+        hop_length = 512
+        
         for _ in range(top_n):
             max_idx = np.argmax(rms_cp)
+            if rms_cp[max_idx] <= 0:
+                break
+                
             max_time = frames_to_time[max_idx]
             
-            # Define window around peak
-            start = max(0, max_time - 2.5)
-            end = min(duration, max_time + 2.5)
+            # Define window around peak (2.5s before and after = 5s total)
+            start_time = max(0, max_time - 2.5)
+            end_time = min(duration, max_time + 2.5)
             
-            peaks.append((start, end))
+            peaks.append((start_time, end_time))
             
-            # Zero out this region in rms_copy to find next distinct peak
-            # Convert time back to frames
-            start_frame = librosa.time_to_frames(start, sr=sr)
-            end_frame = librosa.time_to_frames(end, sr=sr)
-            rms_cp[start_frame:end_frame] = 0
+            # Zero out the region in the RMS array to find the NEXT peak
+            # We calculate frame indices specifically to match the rms array
+            buffer_time = 3.0 # Zero out slightly more to ensure separation
+            zero_start_frame = max(0, int((max_time - buffer_time) * sr / hop_length))
+            zero_end_frame = min(len(rms_cp), int((max_time + buffer_time) * sr / hop_length))
+            
+            rms_cp[zero_start_frame:zero_end_frame] = 0
             
         peaks.sort()
         return peaks

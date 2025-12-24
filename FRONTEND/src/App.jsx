@@ -17,94 +17,109 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 const App = () => {
   const [screen, setScreen] = useState('upload'); // upload, loading, results, guide
-  const [videoFile, setVideoFile] = useState(null);
-  const [analysisResult, setAnalysisResult] = useState(null);
+  const [videoFiles, setVideoFiles] = useState([]); // Array of files
+  const [currentAnalyzing, setCurrentAnalyzing] = useState(""); // Name of video being analyzed
+
+  // NEW: Support multiple results
+  const [allResults, setAllResults] = useState([]);
+  const [selectedResultIndex, setSelectedResultIndex] = useState(0);
+
   const [selectedApp, setSelectedApp] = useState('');
   const [chatMessages, setChatMessages] = useState([]);
   const [userInput, setUserInput] = useState('');
   const [isSharing, setIsSharing] = useState(false);
   const [stream, setStream] = useState(null);
 
-  const handleShareScreen = async () => {
-    try {
-      if (isSharing) {
-        // Stop sharing
-        if (stream) {
-          stream.getTracks().forEach(track => track.stop());
-        }
-        setStream(null);
-        setIsSharing(false);
-      } else {
-        // Start sharing
-        const captureStream = await navigator.mediaDevices.getDisplayMedia({
-          video: true
-        });
-        setStream(captureStream);
-        setIsSharing(true);
-
-        // Handle stop sharing from browser UI
-        captureStream.getVideoTracks()[0].onended = () => {
-          setIsSharing(false);
-          setStream(null);
-        };
-      }
-    } catch (err) {
-      console.error("Error sharing screen: ", err);
-      alert("Could not share screen. Please check permissions.");
-    }
+  // Helper to format seconds to MM:SS
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // State to hold the final summary for chat context
-  const [analysisSummary, setAnalysisSummary] = useState(null);
+  const handleShareScreen = async () => {
+    // ... (rest of share screen logic)
+    try {
+      if (isSharing) {
+        if (stream) { stream.getTracks().forEach(track => track.stop()); }
+        setStream(null); setIsSharing(false);
+      } else {
+        const captureStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+        setStream(captureStream); setIsSharing(true);
+        captureStream.getVideoTracks()[0].onended = () => { setIsSharing(false); setStream(null); };
+      }
+    } catch (err) { console.error(err); alert("Permission denied."); }
+  };
 
   // REAL Analysis call
   const handleAnalyze = async () => {
-    if (!videoFile) return;
+    if (videoFiles.length === 0) return;
     setScreen('loading');
 
-    const formData = new FormData();
-    formData.append('video', videoFile);
+    let newResultsBatch = [];
 
-    try {
-      const response = await fetch('http://localhost:8888/analyze', {
-        method: 'POST',
-        body: formData,
-      });
+    for (const file of videoFiles) {
+      setCurrentAnalyzing(file.name);
+      const formData = new FormData();
+      formData.append('video', file);
 
-      if (!response.ok) throw new Error('Analysis failed');
+      try {
+        const response = await fetch('http://localhost:8888/analyze', {
+          method: 'POST',
+          body: formData,
+        });
 
-      const data = await response.json();
+        if (!response.ok) throw new Error(`Analysis failed for ${file.name}`);
 
-      // Map API response to UI state
-      setAnalysisResult({
-        language: data.summary.detected_language,
-        duration: 'Detected', // AI returns duration, but UI expects string
-        highlightsCount: data.summary.total_highlights,
-        silenceCount: data.summary.total_silences,
-        suggestionsCount: data.summary.total_suggestions,
-        suggestions: data.suggestions.map(s => ({
-          type: s.type.charAt(0).toUpperCase() + s.type.slice(1),
-          start: s.start.toFixed(1),
-          end: s.end.toFixed(1),
-          reason: s.reason,
-          confidence: Math.round(s.confidence * 100)
-        }))
-      });
-      setAnalysisSummary(data.summary);
+        const data = await response.json();
+
+        // Map API response to our rich state
+        const newResult = {
+          name: file.name,
+          id: data.analysis_id,
+          time: data.timestamp,
+          language: data.summary.detected_language,
+          duration: formatTime(data.summary.duration || 0),
+          highlightsCount: data.summary.total_highlights,
+          silenceCount: data.summary.total_silences,
+          suggestionsCount: data.summary.total_suggestions,
+          summary: data.summary, // store for chat context
+          suggestions: data.suggestions.map(s => ({
+            type: s.type.charAt(0).toUpperCase() + s.type.slice(1),
+            start: formatTime(s.start),
+            end: formatTime(s.end),
+            reason: s.reason,
+            confidence: Math.round(s.confidence * 100)
+          }))
+        };
+        newResultsBatch.push(newResult);
+      } catch (err) {
+        console.error(err);
+        alert("Error analyzing " + file.name + ": " + err.message);
+      }
+    }
+
+    if (newResultsBatch.length > 0) {
+      setAllResults(current => [...newResultsBatch, ...current]);
+      setSelectedResultIndex(0);
+      setVideoFiles([]); // Clear selection
       setScreen('results');
-    } catch (err) {
-      console.error(err);
-      alert("Error during analysis: " + err.message);
+    } else {
       setScreen('upload');
     }
   };
 
   const handleFileUpload = (e) => {
-    const file = e.target.files[0];
-    if (file && (file.type === 'video/mp4' || file.name.endsWith('.mp4'))) {
-      setVideoFile(file);
+    const files = Array.from(e.target.files);
+    const validFiles = files.filter(f =>
+      f.type === 'video/mp4' ||
+      f.name.toLowerCase().endsWith('.mp4')
+    );
+
+    if (validFiles.length > 0) {
+      setVideoFiles(validFiles);
     } else {
-      alert('Please upload a valid MP4 video.');
+      alert('Please upload valid MP4 videos.');
     }
   };
 
@@ -123,7 +138,9 @@ const App = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: userInput,
-          analysis_summary: analysisSummary
+          analysis_summary: allResults[selectedResultIndex]?.summary,
+          selected_app: selectedApp,
+          is_sharing: isSharing
         }),
       });
 
@@ -145,15 +162,17 @@ const App = () => {
           <Video className="logo-icon" size={24} />
           <span>AI Video Assistant</span>
         </div>
-        {screen !== 'upload' && (
-          <button className="btn-secondary" onClick={() => setScreen('upload')}>
-            <RotateCcw size={16} style={{ marginRight: '8px' }} />
-            New Upload
-          </button>
-        )}
+        <div className="nav-actions">
+          {screen !== 'upload' && (
+            <button className="btn-secondary" onClick={() => setScreen('upload')}>
+              <Upload size={16} style={{ marginRight: '8px' }} />
+              Add Another Video
+            </button>
+          )}
+        </div>
       </nav>
 
-      <main className="content">
+      <main className="main-content">
         <AnimatePresence mode="wait">
           {screen === 'upload' && (
             <motion.div
@@ -161,44 +180,49 @@ const App = () => {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
-              className="upload-screen"
+              className="upload-card"
             >
-              <div className="hero-text">
-                <h1>AI Video Editing Assistant</h1>
-                <p>Upload a video and get smart editing suggestions in seconds.</p>
-                <div className="team-badge">Built by Data Diggers</div>
+              <div className="upload-header">
+                <Upload className="upload-icon" size={48} />
+                <h1>Analyze New Video</h1>
+                <p>Upload a video to get AI-powered editing suggestions and highlights.</p>
               </div>
 
-              <div className="glass-card upload-card">
+              {allResults.length > 0 && (
+                <div className="history-section">
+                  <h4>Previous Analyses:</h4>
+                  <div className="history-list">
+                    {allResults.map((res, idx) => (
+                      <button
+                        key={res.id}
+                        onClick={() => { setSelectedResultIndex(idx); setScreen('results'); }}
+                        className="history-item"
+                      >
+                        {res.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <label className="file-input-label" htmlFor="video-upload">
                 <input
+                  id="video-upload"
                   type="file"
                   accept="video/mp4"
-                  id="video-upload"
-                  hidden
+                  multiple
                   onChange={handleFileUpload}
                 />
-                <label htmlFor="video-upload" className="upload-label">
-                  {videoFile ? (
-                    <div className="file-info">
-                      <CheckCircle2 color="var(--success-color)" size={48} />
-                      <h3>{videoFile.name}</h3>
-                      <p>{(videoFile.size / (1024 * 1024)).toFixed(2)} MB</p>
-                    </div>
-                  ) : (
-                    <div className="upload-placeholder">
-                      <Upload size={48} color="var(--accent-color)" />
-                      <h3>Drop your MP4 here</h3>
-                      <p>or click to browse your files</p>
-                    </div>
-                  )}
-                </label>
+                <span>{videoFiles.length > 0 ? `${videoFiles.length} videos selected` : 'Choose MP4 videos...'}</span>
+              </label>
 
-                {videoFile && (
-                  <button className="btn-primary analyze-btn" onClick={handleAnalyze}>
-                    Analyze Video
-                  </button>
-                )}
-              </div>
+              <button
+                className={`btn-primary ${videoFiles.length === 0 ? 'disabled' : ''}`}
+                onClick={handleAnalyze}
+                disabled={videoFiles.length === 0}
+              >
+                Analyze {videoFiles.length > 1 ? `${videoFiles.length} Videos` : 'Video'}
+              </button>
             </motion.div>
           )}
 
@@ -210,18 +234,16 @@ const App = () => {
               exit={{ opacity: 0 }}
               className="loading-screen"
             >
-              <div className="loader-container">
-                <div className="pulse-circle"></div>
-                <h2>AI is analyzing your video...</h2>
-                <p>Detecting silence, audio energy, and key moments.</p>
-                <div className="progress-bar-container">
-                  <div className="progress-bar loading-gradient"></div>
-                </div>
-              </div>
+              <div className="loader"></div>
+              <h2>Analyzing Video...</h2>
+              <p style={{ color: 'var(--accent-color)', fontWeight: '600', marginBottom: '8px' }}>
+                Currently: {currentAnalyzing}
+              </p>
+              <p>Extracting audio, detecting highlights, and generating suggestions.</p>
             </motion.div>
           )}
 
-          {screen === 'results' && (
+          {screen === 'results' && allResults[selectedResultIndex] && (
             <motion.div
               key="results"
               initial={{ opacity: 0, scale: 0.95 }}
@@ -230,43 +252,58 @@ const App = () => {
               className="results-screen"
             >
               <div className="results-header">
-                <h2>Analysis Results</h2>
+                <div className="title-row">
+                  <div className="title-group">
+                    <h2>Analysis: {allResults[selectedResultIndex].name}</h2>
+                    {allResults.length > 1 && (
+                      <select
+                        className="result-switcher"
+                        value={selectedResultIndex}
+                        onChange={(e) => setSelectedResultIndex(parseInt(e.target.value))}
+                      >
+                        {allResults.map((res, idx) => (
+                          <option key={res.id} value={idx}>{res.name}</option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                  <span className="metadata">ID: {allResults[selectedResultIndex].id} | {allResults[selectedResultIndex].time}</span>
+                </div>
                 <div className="stats-row">
-                  <div className="stat-item"><Star size={16} /> Language: <span>{analysisResult.language}</span></div>
-                  <div className="stat-item"><Clock size={16} /> Duration: <span>{analysisResult.duration}</span></div>
-                  <div className="stat-item">Highlights: <span>{analysisResult.highlightsCount}</span></div>
-                  <div className="stat-item">Silences: <span>{analysisResult.silenceCount}</span></div>
+                  <div className="stat-item"><Star size={16} /> Language: <span>{allResults[selectedResultIndex].language}</span></div>
+                  <div className="stat-item"><Clock size={16} /> Duration: <span>{allResults[selectedResultIndex].duration}</span></div>
+                  <div className="stat-item"><Scissors size={16} /> Suggestions: <span>{allResults[selectedResultIndex].suggestionsCount}</span></div>
                 </div>
               </div>
 
               <div className="suggestions-list">
-                <h3>Editing Suggestions</h3>
-                {analysisResult.suggestions.map((item, idx) => (
-                  <div key={idx} className="glass-card suggestion-card">
-                    <div className="sug-icon">
-                      {item.type === 'Highlight' ? <Star color="var(--warning-color)" /> : <Scissors color="var(--accent-color)" />}
+                {allResults[selectedResultIndex].suggestions.map((suggestion, index) => (
+                  <div key={index} className="suggestion-card">
+                    <div className="suggestion-icon">
+                      {suggestion.type === 'Highlight' ? <Star size={18} /> :
+                        suggestion.type === 'Transition' ? <RotateCcw size={18} /> : <Scissors size={18} />}
                     </div>
-                    <div className="sug-details">
-                      <div className="sug-meta">
-                        <span className={`tag ${item.type.toLowerCase()}`}>{item.type}</span>
-                        <span className="timestamp">{item.start} - {item.end}</span>
+                    <div className="suggestion-content">
+                      <div className="suggestion-meta">
+                        <span className={`tag ${suggestion.type.toLowerCase()}`}>{suggestion.type.toUpperCase()}</span>
+                        <span className="timestamp">{suggestion.start} - {suggestion.end}</span>
                       </div>
-                      <p className="reason">{item.reason}</p>
+                      <p className="reason">{suggestion.reason}</p>
                     </div>
-                    <div className="sug-confidence">
-                      <span className="conf-label">Confidence</span>
-                      <div className="conf-bar-bg">
-                        <div className="conf-bar-fill" style={{ width: `${item.confidence}%` }}></div>
+                    <div className="confidence-score">
+                      <div className="score-label">Confidence</div>
+                      <div className="score-bar">
+                        <div className="score-fill" style={{ width: `${suggestion.confidence}%` }}></div>
                       </div>
-                      <span className="conf-val">{item.confidence}%</span>
+                      <div className="score-value">{suggestion.confidence}%</div>
                     </div>
                   </div>
                 ))}
               </div>
 
               <div className="actions-row">
-                <button className="btn-secondary" onClick={() => window.print()}>
-                  Edit on my own
+                <button className="btn-secondary" onClick={() => setScreen('upload')}>
+                  <Upload size={16} style={{ marginRight: '8px' }} /> Add Another
                 </button>
                 <button className="btn-primary" onClick={() => setScreen('guide')}>
                   Guide Me <ChevronRight size={18} />
@@ -294,6 +331,8 @@ const App = () => {
                       <option value="Canva">Canva</option>
                       <option value="InShot">InShot</option>
                       <option value="DaVinci Resolve">DaVinci Resolve</option>
+                      <option value="Premiere Pro">Premiere Pro</option>
+                      <option value="Final Cut Pro">Final Cut Pro</option>
                       <option value="Other">Other</option>
                     </select>
                   </div>
@@ -303,7 +342,7 @@ const App = () => {
                       <Monitor size={20} />
                       <h4>Share Screen (Optional)</h4>
                     </div>
-                    <p>Screen sharing is only for guidance and confidence. The app does NOT see or control the screen.</p>
+                    <p className="share-note">For real-time guidance context.</p>
                     <button
                       className={`btn-secondary share-btn ${isSharing ? 'active' : ''}`}
                       onClick={handleShareScreen}
@@ -320,12 +359,16 @@ const App = () => {
                       </div>
                     )}
                   </div>
+
+                  <button className="btn-secondary" style={{ width: '100%', marginTop: 'auto' }} onClick={() => setScreen('results')}>
+                    <RotateCcw size={16} style={{ marginRight: '8px' }} /> Back to Results
+                  </button>
                 </div>
 
                 <div className="chat-container glass-card">
                   <div className="chat-messages">
                     <div className="msg assistant">
-                      <p>Hello! I can guide you through the edits. What would you like to know?</p>
+                      <p>Hello! I can guide you through the edits for "<strong>{allResults[selectedResultIndex]?.name}</strong>". What would you like to know?</p>
                     </div>
                     {chatMessages.map((msg, idx) => (
                       <div key={idx} className={`msg ${msg.role}`}>

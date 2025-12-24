@@ -16,10 +16,16 @@ sys.path.append(AI_SRC_PATH)
 try:
     from VideoEditorAI.pipeline import VideoAnalysisPipeline
     from VideoEditorAI.chat.llm import EditingAssistant
+    
+    print("Initializing Global AI Pipeline (this may take a moment)...")
+    global_pipeline = VideoAnalysisPipeline()
+    global_assistant = EditingAssistant()
+    print("Global AI Pipeline ready.")
 except ImportError as e:
     print(f"Error importing AI components: {e}")
     print(f"Check if {AI_SRC_PATH} exists and contains VideoEditorAI")
-    # We'll handle this in the endpoints if imports failed
+    global_pipeline = None
+    global_assistant = None
 
 app = FastAPI(title="AI Video Editing Assistant Backend")
 
@@ -37,6 +43,28 @@ app.add_middleware(
 class ChatRequest(BaseModel):
     message: str
     analysis_summary: Optional[dict] = None
+    selected_app: Optional[str] = None
+    is_sharing: bool = False
+
+# --- Helper for Language Mapping ---
+LANGUAGE_MAP = {
+    "en": "English",
+    "es": "Spanish",
+    "fr": "French",
+    "de": "German",
+    "it": "Italian",
+    "pt": "Portuguese",
+    "ru": "Russian",
+    "zh": "Chinese",
+    "ja": "Japanese",
+    "ko": "Korean",
+    "hi": "Hindi",
+    "ar": "Arabic",
+    # Add more as needed
+}
+
+def get_language_name(code: str) -> str:
+    return LANGUAGE_MAP.get(code.lower(), code.capitalize())
 
 # --- Endpoints ---
 
@@ -56,38 +84,47 @@ async def analyze_video(video: UploadFile = File(...)):
 
     try:
         # Save the uploaded file
+        total_size = 0
         with open(temp_video_path, "wb") as buffer:
             shutil.copyfileobj(video.file, buffer)
+            total_size = os.path.getsize(temp_video_path)
+            
+        print(f"\n[DEBUG] --- NEW ANALYSIS REQUEST ---")
+        print(f"[DEBUG] Original File: {video.filename}")
+        print(f"[DEBUG] Temp File: {temp_video_path} (Size: {total_size} bytes)")
 
-        # Run Analysis
-        pipeline = VideoAnalysisPipeline()
-        result = pipeline.analyze_video(temp_video_path)
+        # Run Analysis using Global Pipeline
+        if global_pipeline is None:
+            raise HTTPException(status_code=500, detail="AI Pipeline failed to initialize. Check server logs.")
+            
+        result = global_pipeline.analyze_video(temp_video_path)
 
-        # The result is an AnalysisResult object, we need to convert to JSON-serializable dict
-        # Based on pipeline.py, it likely has a to_json() method or can be converted
-        # In main.py:37, we saw: print(json.dumps(result.to_json(), indent=4))
-        
-        analysis_data = result.to_json()
+        print(f"[DEBUG] Analysis complete. Detected Language: {result.language}")
+        print(f"[DEBUG] Suggestions: {len(result.suggestions)}")
 
-        # Simplify for the requested frontend format
-        # {
-        #   "summary": { "detected_language": "string", "total_silences": number, ... },
-        #   "suggestions": [ ... ]
-        # }
-        
+        # Build response with a unique ID and Timestamp to verify freshness
+        import time
+        analysis_id = str(uuid.uuid4())[:8]
+        timestamp = time.strftime("%H:%M:%S")
+
         response = {
+            "analysis_id": analysis_id,
+            "timestamp": timestamp,
             "summary": {
-                "detected_language": analysis_data.get("language", "unknown"),
-                "total_silences": len(analysis_data.get("silence_segments", [])),
-                "total_highlights": sum(1 for s in analysis_data.get("suggestions", []) if s.get("type", "").lower() == "highlight"),
-                "total_suggestions": len(analysis_data.get("suggestions", []))
+                "detected_language": get_language_name(result.language),
+                "duration": result.duration,
+                "total_silences": len(result.silence_segments),
+                "total_highlights": sum(1 for s in result.suggestions if s.suggestion_type.value == "highlight"),
+                "total_suggestions": len(result.suggestions)
             },
-            "suggestions": analysis_data.get("suggestions", [])
+            "suggestions": [s.to_dict() for s in result.suggestions]
         }
-
+        
+        print(f"[DEBUG] Returning Analysis ID: {analysis_id} at {timestamp}")
         return response
 
     except Exception as e:
+        print(f"[ERROR] {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         # Cleanup
@@ -100,15 +137,21 @@ async def chat(request: ChatRequest):
     Receive user message and optional analysis summary, return Gemini assistant response.
     """
     try:
-        assistant = EditingAssistant()
-        
+        if global_assistant is None:
+            raise HTTPException(status_code=500, detail="Gemini Assistant failed to initialize. Check API key.")
+            
         # Convert analysis_summary to string context if provided
         context = ""
         if request.analysis_summary:
             import json
             context = json.dumps(request.analysis_summary)
 
-        reply = assistant.chat(request.message, context)
+        reply = global_assistant.chat(
+            request.message, 
+            context, 
+            selected_app=request.selected_app, 
+            is_sharing=request.is_sharing
+        )
         return {"reply": reply}
 
     except Exception as e:

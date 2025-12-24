@@ -53,10 +53,13 @@ class EditingAssistant:
                 return "The assistant produced an empty response due to context limits or safety filtering. Try a shorter question."
             return f"Error communicating with Gemini: {error_msg}"
 
-    def chat(self, user_query: str, analysis_summary: str = None) -> str:
+    def chat(self, user_query: str, analysis_summary: str = None, selected_app: str = None, is_sharing: bool = False) -> str:
         """Main chat interface for explaining video analysis results."""
         if user_query.strip().lower() in ["hi", "hello", "hii"]:
             return "Hello! I'm your AI video editing assistant. I've analyzed your video—ask me about cuts, highlights, or how to implement the suggested edits!"
+
+        app_context = f"The user is using {selected_app}." if selected_app else "The user has not selected a specific editing app."
+        sharing_context = "The user is currently sharing their screen." if is_sharing else "The user is NOT sharing their screen."
 
         system_instruction = (
             "You are a simple video editing helper.\n"
@@ -64,19 +67,23 @@ class EditingAssistant:
             "Your rules:\n"
             "- Use very simple English.\n"
             "- Keep answers short and clear.\n"
+            "- Do NOT start every message with 'Hello' or 'Hi'.\n"
             "- Do NOT explain theory.\n"
             "- Do NOT repeat information.\n"
             "- Do NOT use advanced words.\n"
             "- If the user asks 'how to do it', reply with step-by-step actions.\n"
             "- Steps must be like: Click this → Do that → Done.\n"
-            "- If editing app is not mentioned, give general steps.\n"
+            f"- {app_context}\n"
+            f"- {sharing_context}\n"
+            "- If the user asks if you can see their screen, explain that while they are sharing, you can only provide guidance based on their questions.\n"
             "- Do NOT act like an expert analyst.\n"
-            "- Be friendly and direct.\n"
+            "- Be direct and helpful.\n"
             "\n"
             "Answer format rules:\n"
             "- Maximum 5 steps.\n"
             "- Each step must be one short sentence.\n"
             "- No long paragraphs.\n"
+            "- No repetitive greetings.\n"
         )
 
         context = ""
