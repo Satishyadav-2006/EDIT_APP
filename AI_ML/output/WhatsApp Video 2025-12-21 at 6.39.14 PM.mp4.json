@@ -1,0 +1,25 @@
+{
+  "video_path": "C:\\Users\\DELL\\Downloads\\WhatsApp Video 2025-12-21 at 6.39.14 PM.mp4",
+  "duration": 48.04,
+  "summary": {
+    "total_suggestions": 2,
+    "cuts": 0,
+    "highlights": 2
+  },
+  "suggestions": [
+    {
+      "type": "highlight",
+      "start": 13.31,
+      "end": 18.31,
+      "confidence": 0.6,
+      "reason": "High audio energy detected (potential highlight)"
+    },
+    {
+      "type": "highlight",
+      "start": 17.77,
+      "end": 22.77,
+      "confidence": 0.6,
+      "reason": "High audio energy detected (potential highlight)"
+    }
+  ]
+}

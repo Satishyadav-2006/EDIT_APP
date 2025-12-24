@@ -1,0 +1,32 @@
+{
+  "video_path": "dummy_video.mp4",
+  "duration": 0.0,
+  "summary": {
+    "total_suggestions": 3,
+    "cuts": 2,
+    "highlights": 1
+  },
+  "suggestions": [
+    {
+      "type": "cut",
+      "start": 10.0,
+      "end": 15.0,
+      "confidence": 0.9,
+      "reason": "Detected detected dead air/silence (5.0s)"
+    },
+    {
+      "type": "cut",
+      "start": 15.0,
+      "end": 20.0,
+      "confidence": 0.8,
+      "reason": "Content is semantically redundant to segment at 5.0s"
+    },
+    {
+      "type": "highlight",
+      "start": 20.0,
+      "end": 25.0,
+      "confidence": 0.7,
+      "reason": "Contains key phrase suggesting importance: 'Don't forget to subs...'"
+    }
+  ]
+}

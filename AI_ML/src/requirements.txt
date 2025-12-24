@@ -1,0 +1,10 @@
+numpy
+scipy
+librosa
+openai-whisper
+sentence-transformers
+scikit-learn
+ffmpeg-python
+google-genai
+pydantic
+
